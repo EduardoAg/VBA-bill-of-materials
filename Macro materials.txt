@@ -1,0 +1,870 @@
+Option Explicit
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Si alguien algun dia mira esto: El cuello de botella esta en el delete de las rows. Es mas rapido copiar a una nueva hoja
+'lo necesario. - Eduardo Aguilar
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Crea la hoja donde se van a encontrar los resultados del corrido de materiales
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Function CrearHojaMateriales(wkbMateriales As Workbook) As Worksheet
+    Dim intentos As Integer
+    Dim nombre As String
+    Dim shtMateriales As Worksheet
+    
+    'Si hay error en la asignacion de nombres se va a la tag YaExiste
+    On Error GoTo YaExiste
+    Set shtMateriales = wkbMateriales.Sheets.Add
+    nombre = "MATERIALES"
+    shtMateriales.Name = nombre
+    Set CrearHojaMateriales = shtMateriales
+    Exit Function
+    
+    'En caso de que ya exista la hoja corre este procedimiento
+YaExiste:
+    'Incrementa el intento y lo concatena con el nombre de la hoja
+    intentos = intentos + 1
+    nombre = "MATERIALES" + Trim(Str(intentos))
+    Resume
+End Function
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Extrae el nombre del libro de una combinacion de Excel Libro+Hoja como '[Libro.xls]Hoja'
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Function ExtraerLibro(ByVal LibroHoja As String) As String
+    Dim ciclo As Integer, Corchete As Boolean, Libro As String
+    Corchete = False
+    Libro = ""
+    'Itera por la string, si encuentra un corchete de apertura hace que corchete sea true y concatena la string del nombre libro
+    'Sale del ciclo cuando encuentra un corchete de cierre
+    For ciclo = 1 To Len(LibroHoja)
+        If Mid(LibroHoja, ciclo, 1) = "[" Then
+            Corchete = True
+        ElseIf Mid(LibroHoja, ciclo, 1) = "]" Then
+            Exit For
+        Else
+            If Corchete = True Then Libro = Libro + Mid(LibroHoja, ciclo, 1)
+        End If
+    Next ciclo
+    ExtraerLibro = Libro
+End Function
+
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Extrae el nombre de la hoja de una combinacion de Excel Libro+Hoja como '[Libro.xls]Hoja'
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Function ExtraerHoja(ByVal LibroHoja As String) As String
+    Dim ciclo As Integer, Hoja As String
+    Hoja = ""
+    For ciclo = 1 To Len(LibroHoja)
+        'Cuando encuentra un corchete de cierre regresa todo lo que esta despues del corchete
+        'NOTA: Podria fallar si el nombre contiene la direccion de una celda como !A1.
+        If Mid(LibroHoja, ciclo, 1) = "]" Then
+            Hoja = Mid(LibroHoja, ciclo + 1)
+            Exit For
+        End If
+    Next ciclo
+    ExtraerHoja = Hoja
+End Function
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Copia las fichas de la hoja de fichas a la hoja de materiales. Despues determina si el material esta en ficha primaria, en BD, o es accesorio
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub CopiarFichas(ByVal wkbFichas As Workbook, ByVal shtFichas As Worksheet, ByVal wkbMateriales As Workbook, ByVal shtMateriales As Worksheet)
+    Dim ciclo As Long
+    Dim ciclo2 As Long
+    Dim resultados As String
+
+    'Copia todas las fichas de la hoja de fichas y las pega en la hoja de materiales
+    Dim lastRow As Long
+    Dim rangeCopy As Range
+    Dim rangePaste As Range
+    lastRow = shtFichas.cells(shtFichas.Rows.Count, 7).End(xlUp).Row + 1
+    Set rangeCopy = shtFichas.Range("B1:G" & lastRow)
+    Set rangePaste = shtMateriales.Range("B1:G" & lastRow)
+    rangeCopy.Copy
+    rangePaste.PasteSpecial xlPasteValues
+    
+    'Determina el numero de la ficha en la que estan con formula de Excel. Copia solo los valores despues.
+    lastRow = shtMateriales.cells(shtMateriales.Rows.Count, 7).End(xlUp).Row + 1
+    shtMateriales.Range("A12:A" & lastRow).FormulaR1C1 = "=IF(R[2]C[1]=""Dist. CABLE"",RC[1],R[-1]C)"
+    shtMateriales.Range("A12:A" & lastRow).Calculate
+    shtMateriales.Range("A12:A" & lastRow).Copy
+    shtMateriales.Range("A12:A" & lastRow).PasteSpecial xlPasteValues
+    
+    'Determina si la fila pertenece a un material o a algo mas. Copia solo los valores despues
+    shtMateriales.Range("H2:H" & lastRow).FormulaR1C1 = "=IF(OR(RC[-1]="""",RC[-2]="""",RC[-5]="""",RC[-5]=""CANTIDAD ANALIZADA"",RC[-5]=""COSTOS ESPECIALES / ALQUILER DE EQUIPO"",RC[-6]=""CODIGO"",LEN(RC[-5])<5,RC[-5]=""CANTIDAD ANALIZADA""),""NoImporta"",""SiImporta"")"
+    shtMateriales.Range("H2:H" & lastRow).Calculate
+    Range("H2:H" & lastRow).Copy
+    Range("H2:H" & lastRow).PasteSpecial xlPasteValues
+        
+    'Filtra las celdas para determinar si importa o no importa. Si no importan borra la fila. Despues borra toda la columna que contiene el NoImporta. Quita el autofilter despues
+    shtMateriales.Range("A1:H" & lastRow).AutoFilter field:=8, Criteria1:="<>SiImporta", Operator:=xlAnd
+    lastRow = shtMateriales.cells(shtMateriales.Rows.Count, 8).End(xlUp).Row
+    shtMateriales.Range("A2:H" & lastRow).SpecialCells(xlCellTypeVisible).EntireRow.Delete
+    shtMateriales.Range("A1:H" & lastRow).AutoFilter
+    lastRow = shtMateriales.cells(shtMateriales.Rows.Count, 8).End(xlUp).Row
+    shtMateriales.Range("H1:H" & lastRow).ClearContents
+    
+    'Si hay uno o mas items en la lista de fichas primarias se corre.
+    If frmMateriales.lstFichasPrimarias.ListCount > 0 Then
+        'Crea la formula que revisa si el material es de ficha primaria para la primera hoja de las fichas primarias
+        Call existeEnPrimariasPrimero(wkbMateriales, shtMateriales, lastRow, 2)
+        'Crea las formulas que revisa si el material es de ficha primaria para las hojas finales de la ficha primaria
+        Call existeEnPrimariasFinales(wkbMateriales, shtMateriales, lastRow, 2)
+    End If
+    
+    'Determina si el entry es material, accesorio o ficha primaria
+    Call discriminacionMateriales(shtMateriales, lastRow, 2)
+    
+    'Concatena todos los resultados y los guarda en la columna H
+    Call concatenarResultados(shtMateriales, lastRow, 2)
+    
+    'Limpia las columnas innecesarias
+    shtMateriales.Range("J2", shtMateriales.cells(lastRow, 10 + frmMateriales.lstFichasPrimarias.ListCount + 1)).ClearContents
+    
+    'Pone los titulos de la tabla
+    shtMateriales.Range("A1").Value = "# FICHA"
+    shtMateriales.Range("B1").Value = "CODIGO"
+    shtMateriales.Range("C1").Value = "DESCRIPCION"
+    shtMateriales.Range("D1").Value = "UNIDAD"
+    shtMateriales.Range("E1").Value = "P. UNIT"
+    shtMateriales.Range("F1").Value = "CANTIDAD"
+    shtMateriales.Range("G1").Value = "TOTAL"
+    shtMateriales.Range("H1").Value = "TIPO"
+
+End Sub
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Concatena todos los resultados de la discriminacion de materiales
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub concatenarResultados(shtMateriales As Worksheet, lastRow As Long, inicio As Long)
+    Dim resultados As String
+    Dim i As Integer
+    resultados = "=CONCATENATE(RC[+1]"
+    For i = 1 To frmMateriales.lstFichasPrimarias.ListCount + 1
+        resultados = resultados & ",RC[+" & i + 1 & "]"
+    Next i
+    resultados = resultados + ")"
+    shtMateriales.Range("H" & inicio & ":H" & lastRow).FormulaR1C1 = resultados
+    shtMateriales.Range("H" & inicio & ":H" & lastRow).Calculate
+    shtMateriales.Range("H" & inicio & ":H" & lastRow).Copy
+    shtMateriales.Range("H" & inicio & ":H" & lastRow).PasteSpecial xlPasteValues
+End Sub
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Si el material es de fichas primarias esto retorna vacio, si no es de ficha primaria lo busca en la BD con un vlookup por medio del codigo.
+'Si no lo encuentra entonces es accesorio, de lo contrario es material
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub discriminacionMateriales(shtMateriales As Worksheet, lastRow As Long, inicio As Long)
+    Dim resultados As String
+    Dim i As Integer
+    resultados = "AND("
+    For i = 1 To frmMateriales.lstFichasPrimarias.ListCount + 1
+        If i = 1 Then
+            resultados = resultados + "RC[-" & i & "]="""""
+        Else
+            resultados = resultados + ",RC[-" & i & "]="""""
+        End If
+    Next i
+    resultados = resultados + ")"
+    shtMateriales.Range(shtMateriales.cells(inicio, 8 + i), shtMateriales.cells(lastRow, 8 + i)).FormulaR1C1 = "=IF(" + resultados + ",IF(ISERROR(VLOOKUP(RC2,BD,2,FALSE)),""Accesorios"",""Material""),"""")"
+    shtMateriales.Range(shtMateriales.cells(inicio, 8 + i), shtMateriales.cells(lastRow, 8 + i)).Calculate
+End Sub
+
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Crea una formula de Excel que realiza lo siguiente: Si la descripcion de material es "Accesorios " (si, con el espacio) entonces deja vacio.
+'Hace un vlookup con el codigo del materiales contra la hoja primera de fichas primarias desde la columna 2 hasta la 6 regresa la columna de unidades.
+'Si el vlookup retorna un error entonces retorna vacio. Si el vlookup encuentra algo retorna la columna 2.
+'Si la columna 2 esta vacia pone el siguiente valor FichaEn[Nombre libro.xls]Nombre hoja.
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub existeEnPrimariasPrimero(wkbMateriales As Workbook, shtMateriales As Worksheet, lastRow As Long, inicio As Long)
+    Dim nombreFormula As String
+    
+    'Verifica que el workbook de materiales no sea el mismo que el workbook de las fichas primarias.
+    If wkbMateriales.Name = Mid(frmMateriales.lstFichasPrimarias.List(0), 2, Len(wkbMateriales.Name)) Then
+        nombreFormula = ExtraerHoja(frmMateriales.lstFichasPrimarias.List(0))
+    Else
+        nombreFormula = frmMateriales.lstFichasPrimarias.List(0)
+    End If
+    
+    'Asigna la formula y calcula el range
+    shtMateriales.Range("J" & inicio & ":J" & lastRow).FormulaR1C1 = "=IF(RC2=""Accesorios "","""",IF(ISERROR(VLOOKUP(RC2,'" & nombreFormula & "'!C2:C6,3,FALSE)),"""",IF(VLOOKUP(RC2,'" & nombreFormula & "'!C2:C6,2,FALSE)="""",""FichaEn" + frmMateriales.lstFichasPrimarias.List(0) + ""","""")))"
+    shtMateriales.Range("J" & inicio & ":J" & lastRow).Calculate
+End Sub
+
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Crea una formula de Excel que realiza lo siguiente: Si la descripcion de material es "Accesorios " entonces deja vacio.
+'Revisa que todas las columnas anteriores esten vacias. Es decir, que no haya encontrado nada en las columnas anteriores. Si no esta vacia, no corre el vlookup
+'Hace un vlookup con el codigo del materiales contra la hoja primera de fichas primarias desde la columna 2 hasta la 6 regresa la columna de unidades.
+'Si el vlookup retorna un error entonces retorna vacio. Si el vlookup encuentra algo retorna la columna 2.
+'Si la columna 2 esta vacia pone el siguiente valor FichaEn[Nombre libro.xls]Nombre hoja.
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub existeEnPrimariasFinales(wkbMateriales As Workbook, shtMateriales As Worksheet, lastRow As Long, inicio As Long)
+    Dim resultados As String
+    Dim ciclo As Integer
+    Dim ciclo2 As Integer
+    Dim nombreFormula As String
+    
+    For ciclo = 1 To frmMateriales.lstFichasPrimarias.ListCount - 1
+        resultados = "AND("
+        
+        'El ciclo donde se crea la condicion de que esten vacias todas las columnas anteriores
+        For ciclo2 = 1 To ciclo
+            If ciclo2 = 1 Then
+                resultados = resultados & "RC[-" & ciclo2 & "]="""""
+            Else
+                resultados = resultados & ",RC[-" & ciclo2 & "]="""""
+            End If
+        Next ciclo2
+        resultados = resultados & ")"
+        
+        'Verifica que el workbook de materiales no sea el mismo que el workbook de las fichas primarias.
+        If wkbMateriales.Name = Mid(frmMateriales.lstFichasPrimarias.List(ciclo), 2, Len(wkbMateriales.Name)) Then
+            nombreFormula = ExtraerHoja(frmMateriales.lstFichasPrimarias.List(ciclo))
+        Else
+            nombreFormula = frmMateriales.lstFichasPrimarias.List(ciclo)
+        End If
+        
+        'Asigna la formula y calcula el range
+        shtMateriales.Range(shtMateriales.cells(inicio, 10 + ciclo), shtMateriales.cells(lastRow, 10 + ciclo)).FormulaR1C1 = "=IF(RC2=""Accesorios "","""",IF(" & resultados & ",IF(ISERROR(VLOOKUP(RC2,'" & nombreFormula & "'!C2:C6,3,FALSE)),"""",IF(VLOOKUP(RC2,'" & nombreFormula & "'!C2:C6,2,FALSE)="""",""FichaEn" + frmMateriales.lstFichasPrimarias.List(ciclo) & ""","""")),""""))"
+        shtMateriales.Range(shtMateriales.cells(inicio, 10 + ciclo), shtMateriales.cells(lastRow, 10 + ciclo)).Calculate
+    Next ciclo
+    
+End Sub
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Encuentra los valores unicos dentro de una columna y los guarda en un array
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Function uniqueValues(shtMateriales As Worksheet, startRow As Long, lastRow As Long, startColumn As String) As Variant
+    Dim start
+    Dim columnNumber As Long
+    Dim data As Variant
+    Dim dict As Object
+    Dim r As Long
+    
+    'El numero de la columna definida en startColumn
+    columnNumber = shtMateriales.Range(startColumn & 1).Column
+    
+    'Los valores de la columna que esta siendo analizada
+    data = shtMateriales.Range(startColumn & startRow & ":" & startColumn & lastRow).Value
+    
+    'Crea el diccionario
+    Set dict = CreateObject("Scripting.Dictionary")
+
+    'Llena el diccionario con los keys y con valores Empty
+    For r = 1 To UBound(data)
+        dict(data(r, 1)) = Empty
+    Next
+    
+    'Quita la key "Material" porque no nos importa
+    dict.Remove "Material"
+
+    'Guarda los valores en un 0 based array
+    uniqueValues = dict.keys
+    
+End Function
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Filtra el data range basado en el criteria
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub filterDataRange(dataRange As Range, criteria As String, field As Integer)
+    dataRange.AutoFilter field:=field, Criteria1:=criteria, Operator:=xlAnd
+End Sub
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Explota los materiales que pertenecen a fichas primarias de una manera bien rapida(o eso esperamos)
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub DescomprimirFichasFast(wkbFichas As Workbook, shtFichas As Worksheet, wkbMateriales As Workbook, shtMateriales As Worksheet)
+    Dim lineaActual As Long
+    Dim lastRow As Long
+    Dim rngIteracion As Range
+    Dim rngRow As Range
+    Dim shtFichasActual As Worksheet
+    Dim lineaFichaActual As Long
+    Dim cantMaterialesFicha As Integer
+    Dim cantidadOriginal As Double
+    Dim wkbPrimarias As Workbook
+    Dim rngCopy As Range
+    Dim rngPaste As Range
+    Dim inicioMateriales As Long
+    Dim uniques As Variant
+    Dim i As Integer
+    Dim dataRange As Range
+    Dim visibleColumn As Range
+    Dim celdaActual As String
+    Dim cells As Range
+    Dim numFicha As Long
+    Dim lastAbsoluteRow As Long
+    
+    'La ultima fila
+    lastRow = shtMateriales.cells(shtMateriales.Rows.Count, 1).End(xlUp).Row
+    lastAbsoluteRow = lastRow
+    
+    'El data range de todos los datos
+    Set dataRange = shtMateriales.Range("A1:H" & lastRow)
+    
+    'Guarda los valores unicos y que no son material de la columna H en un array
+    uniques = uniqueValues(shtMateriales, 2, lastRow, "H")
+    
+    'Itera por todos los valores unicos que existen en la fila H
+    For i = 0 To UBound(uniques)
+        'Guarda el valor unico del array actual
+        celdaActual = CStr(uniques(i))
+        
+        'Filtra los datos para solo mostrar solo los elementos que pertenecen a una de las fichas primarias
+        Call filterDataRange(dataRange, "=" & celdaActual, 8)
+        
+        'La hoja y libro en la que se encuentra el material de ficha primaria
+        Set wkbPrimarias = Workbooks(ExtraerLibro(celdaActual))
+        Set shtFichasActual = wkbPrimarias.Worksheets(ExtraerHoja(celdaActual))
+        
+        'Solo selecciona las visible cells del range
+        Set visibleColumn = dataRange.Range(dataRange.cells(2, 9), dataRange.cells(lastRow, 9)).SpecialCells(xlCellTypeVisible)
+        
+        'En la columna I se pone un Match que busca el codigo en la columna B de la ficha primaria
+        Call matchEnPrimarias(visibleColumn, wkbMateriales, shtFichasActual, celdaActual)
+            
+        For Each cells In visibleColumn
+            'El numero de materiales en la ficha primaria
+            cantMaterialesFicha = cantMaterialesEnFicha(shtMateriales, shtFichasActual, cells.Row)
+            
+            'El numero de ficha actual
+            numFicha = shtMateriales.Range("A" & cells.Row).Value
+            
+            'La cantidad original del material que se esta analizando
+            cantidadOriginal = shtMateriales.Range("F" & cells.Row).Value
+            
+            'Copia el codigo, descripcion, unidad y precio unitario de las fichas
+            shtMateriales.Range("B" & lastRow + 1 & ":F" & lastRow + cantMaterialesFicha).Value = shtFichasActual.Range("B" & cells.Value & ":F" & cells.Value - 1 + cantMaterialesFicha).Value
+            
+            'Copia la cantidad de la ficha multiplicada por la cantidad original y calcula el total
+            shtMateriales.Range("G" & lastRow + 1 & ":G" & lastRow + cantMaterialesFicha).FormulaR1C1 = "=RC[-1]*" & changeCommas(cantidadOriginal)
+            shtMateriales.Range("G" & lastRow + 1 & ":G" & lastRow + cantMaterialesFicha).Calculate
+            shtMateriales.Range("F" & lastRow + 1 & ":F" & lastRow + cantMaterialesFicha).Value = shtMateriales.Range("G" & lastRow + 1 & ":G" & lastRow + cantMaterialesFicha).Value
+            shtMateriales.Range("G" & lastRow + 1 & ":G" & lastRow + cantMaterialesFicha).FormulaR1C1 = "=RC[-1]*RC[-2]"
+            shtMateriales.Range("G" & lastRow + 1 & ":G" & lastRow + cantMaterialesFicha).Calculate
+            shtMateriales.Range("G" & lastRow + 1 & ":G" & lastRow + cantMaterialesFicha).Value = shtMateriales.Range("G" & lastRow + 1 & ":G" & lastRow + cantMaterialesFicha).Value
+            shtMateriales.Range("A" & lastRow + 1 & ":A" & lastRow + cantMaterialesFicha).Value = numFicha
+            shtMateriales.Range("H" & lastRow + 1 & ":H" & lastRow + cantMaterialesFicha).Value = "Material"
+            lastRow = lastRow + cantMaterialesFicha
+        Next cells
+        dataRange.AutoFilter
+    Next i
+    
+    'Filtra para todas las que no son materiales y las borra
+    lastRow = shtMateriales.cells(shtMateriales.Rows.Count, 1).End(xlUp).Row
+    Set dataRange = shtMateriales.Range("A1:H" & lastRow)
+    Call filterDataRange(dataRange, "<>Material", 8)
+    On Error GoTo nocells
+    
+    'Si no hay visible cells esto tira error
+    dataRange.Range(dataRange.cells(2, 9), dataRange.cells(lastRow, 9)).SpecialCells(xlCellTypeVisible).EntireRow.Delete
+
+nocells:
+    
+    dataRange.AutoFilter
+    
+    'Limpia la columna H
+    shtMateriales.Range("H1:H" & lastRow).ClearContents
+End Sub
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Cuando una ficha se explota multiplica la cantidad de material declarado en ficha por las cantidades declaradas en la ficha primaria
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub multiplicarCantidades(shtMateriales As Worksheet, lineaActual As Long, cantidadOriginal As Double, cantMaterialesFicha As Integer)
+    Dim rngCantidades As Range
+    Dim rngTotales As Range
+    Dim i As Integer
+    
+    Set rngCantidades = shtMateriales.Range("F" & lineaActual & ":F" & lineaActual + cantMaterialesFicha - 1)
+    Set rngTotales = shtMateriales.Range("G" & lineaActual & ":G" & lineaActual + cantMaterialesFicha - 1)
+    
+    For i = 0 To cantMaterialesFicha - 1
+        shtMateriales.Range("F" & lineaActual + i).Value = shtMateriales.Range("F" & lineaActual + i).Value * cantidadOriginal
+        shtMateriales.Range("G" & lineaActual + i).Value = shtMateriales.Range("E" & lineaActual + i).Value * shtMateriales.Range("F" & lineaActual + i).Value
+    Next i
+End Sub
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Encuentra la cantidad de materiales que contiene una ficha primaria
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Function cantMaterialesEnFicha(shtMateriales As Worksheet, shtFichasActual As Worksheet, lineaActual As Long) As Integer
+    Dim inicioMateriales As Long
+    Dim cantidadMateriales As Integer
+    
+    'El inicio es el numero donde se encuentran los materiales que componen una ficha
+    inicioMateriales = shtMateriales.Range("I" & lineaActual).Value
+    cantidadMateriales = 0
+    
+    While shtFichasActual.Range("B" & inicioMateriales + cantidadMateriales).Value <> "" And Trim(UCase(shtFichasActual.Range("B" & inicioMateriales + cantidadMateriales).Value)) <> "ACCESORIOS"
+        cantidadMateriales = cantidadMateriales + 1
+    Wend
+    
+    cantMaterialesEnFicha = cantidadMateriales
+End Function
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Encuentra en que fila se encuentra el material de la ficha primaria. Añade un match del codigo del material contra las fichas primarias
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub matchEnPrimarias(visibleRange As Range, wkbMateriales As Workbook, shtFichasActual As Worksheet, ubicacion As String)
+    Dim lineaActual As Long
+    Dim formula As String
+    
+    If wkbMateriales.Name = Mid(ubicacion, 9, Len(wkbMateriales.Name)) Then
+        visibleRange.FormulaR1C1 = "=MATCH(RC[-7],'" & shtFichasActual.Name & "'!C2,0)+ 5"
+    Else
+        visibleRange.FormulaR1C1 = "=MATCH(RC[-7],'" & Mid(ubicacion, 8) & "'!C2,0) + 5"
+    End If
+    visibleRange.Calculate
+End Sub
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Crea la tabla dinamica de los materiales, donde consolida las cantidades y los totales
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub crearTablaDinamicaMateriales(wkbMateriales As Workbook, shtMateriales As Worksheet, dataRange As Range, inicio As String)
+    Dim pCache As PivotCache
+    Dim pTable As PivotTable
+    
+    'Crea la tabla dinamica de materiales
+    Set pCache = wkbMateriales.PivotCaches.Create(SourceType:=xlDatabase, SourceData:="'" & shtMateriales.Name & "'!" & dataRange.Address(ReferenceStyle:=xlR1C1), Version:=xlPivotTableVersion15)
+    Set pTable = pCache.CreatePivotTable(TableDestination:=shtMateriales.Range(inicio), TableName:="MATERIALES")
+    
+    'Añade la descripcion a la pivot table.
+    shtMateriales.PivotTables("MATERIALES").AddFields RowFields:="CODIGO"
+    
+    'Añade la cantidad a la pivot table.
+    With shtMateriales.PivotTables("MATERIALES").PivotFields("CANTIDAD")
+        .Orientation = xlDataField
+    End With
+    
+    'Añade el precio unitario a la pivot table, es el promedio de la suma de los precios.
+    With shtMateriales.PivotTables("MATERIALES").PivotFields("P. UNIT")
+        .Orientation = xlDataField
+        .Function = xlAverage
+    End With
+    
+    'Añade el total a la pivot table. Es la suma de todos los totales.
+    With shtMateriales.PivotTables("MATERIALES").PivotFields("TOTAL")
+        .Orientation = xlDataField
+    End With
+End Sub
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Crea la tabla dinamica donde se consolida el total de materiales de las fichas
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub crearTablaDinamicaFichas(wkbMateriales As Workbook, shtMateriales As Worksheet, dataRange As Range, inicio As String)
+    Dim pCache As PivotCache
+    Dim pTable As PivotTable
+    
+    'Crea la tabla dinamica de materiales
+    Set pCache = wkbMateriales.PivotCaches.Create(SourceType:=xlDatabase, SourceData:="'" & shtMateriales.Name & "'!" & dataRange.Address(ReferenceStyle:=xlR1C1), Version:=xlPivotTableVersion15)
+    Set pTable = pCache.CreatePivotTable(TableDestination:=shtMateriales.Range(inicio), TableName:="FICHAS")
+    
+    'Añade la ficha a la pivot table
+    shtMateriales.PivotTables("FICHAS").AddFields RowFields:="# FICHA"
+    
+    'Añade la cantidad a la pivot table
+    With shtMateriales.PivotTables("FICHAS").PivotFields("TOTAL")
+        .Orientation = xlDataField
+    End With
+End Sub
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Crea la tabla dinamica de las familias
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub crearTablaDinamicaFamilias(wkbMateriales As Workbook, shtMateriales As Worksheet, inicio As String)
+    Dim pCache As PivotCache
+    Dim pTable As PivotTable
+    Dim dataRange As Range
+    Dim lastRow As Long
+    
+    'Ultima fila de la lista de materiales
+    lastRow = shtMateriales.cells(shtMateriales.Rows.Count, 9).End(xlUp).Row
+    
+    'El data range de los materiales consolidados
+    Set dataRange = shtMateriales.Range("I1:V" & lastRow)
+    
+    'Crea la tabla dinamica de materiales
+    Set pCache = wkbMateriales.PivotCaches.Create(SourceType:=xlDatabase, SourceData:="'" & shtMateriales.Name & "'!" & dataRange.Address(ReferenceStyle:=xlR1C1), Version:=xlPivotTableVersion15)
+    Set pTable = pCache.CreatePivotTable(TableDestination:=shtMateriales.Range(inicio), TableName:="FAMILIAS")
+    
+    'Añade la familia a las rows de la pivot table
+    shtMateriales.PivotTables("FAMILIAS").AddFields RowFields:="FAMILIA"
+    
+    'Añade el total a la pivot table
+    With shtMateriales.PivotTables("FAMILIAS").PivotFields("TOTAL")
+        .Orientation = xlDataField
+    End With
+    
+    'Añade el total como porcentaje del total a la pivot table
+    With shtMateriales.PivotTables("FAMILIAS").PivotFields("TOTAL")
+        .Orientation = xlDataField
+        .Calculation = xlPercentOfColumn
+    End With
+    
+End Sub
+
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Crea la tabla dinamica de las fichas y los materiales
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub ConsolidarListaMateriales(ByVal wkbMateriales As Workbook, ByVal shtMateriales As Worksheet)
+    Dim dataRange As Range
+    Dim lastRow As Long
+
+    'Ultima fila de las fichas copiadas y explotadas
+    lastRow = shtMateriales.cells(shtMateriales.Rows.Count, 1).End(xlUp).Row
+    
+    'El data range de la informacion a consolidar
+    Set dataRange = shtMateriales.Range("A1:G" & lastRow)
+    
+    'Crea la tabla dinamica de materiales
+    Call crearTablaDinamicaMateriales(wkbMateriales, shtMateriales, dataRange, "AI1")
+    
+    'Crea la tabla dinamica de fichas
+    Call crearTablaDinamicaFichas(wkbMateriales, shtMateriales, dataRange, "AN1")
+End Sub
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Crea la tabla donde se muestra toda la informacion de los materiales
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub crearTablaMateriales(shtMateriales As Worksheet, wkbMateriales As Workbook, wkbAlcance As Workbook)
+    Dim rngCodigos As Range
+    Dim rngSap As Range
+    Dim rngDiseño As Range
+    Dim rngDescripcion As Range
+    Dim rngFamilia As Range
+    Dim rngUnidad As Range
+    Dim rngPrecio As Range
+    Dim rngCantidades As Range
+    Dim rngTotal As Range
+    Dim rngCotizado As Range
+    Dim rngNumCotizacion As Range
+    Dim rngObservaciones As Range
+    Dim rngPorcTotal As Range
+    Dim rngPorcAcum As Range
+    Dim lastRow As Long
+    
+    Dim rngPivotCodigos As Range
+    Dim rngPivotCantidad As Range
+    Dim rngPivtoPrecio As Range
+    Dim rngPivotTotal As Range
+    Dim subTotal As Double
+    
+    'Titulos de la tabla
+    shtMateriales.Range("I1").Value = "CODIGO BDP"
+    shtMateriales.Range("J1").Value = "CODIGO SAP"
+    shtMateriales.Range("K1").Value = "CODIGO DISEÑO"
+    shtMateriales.Range("L1").Value = "DESCRIPCION"
+    shtMateriales.Range("M1").Value = "FAMILIA"
+    shtMateriales.Range("N1").Value = "UNIDAD"
+    shtMateriales.Range("O1").Value = "PRECIO UNITARIO"
+    shtMateriales.Range("P1").Value = "CANTIDAD"
+    shtMateriales.Range("Q1").Value = "TOTAL"
+    shtMateriales.Range("R1").Value = "COTIZADO POR"
+    shtMateriales.Range("S1").Value = "NO. COTIZACION"
+    shtMateriales.Range("T1").Value = "OBSERVACIONES"
+    shtMateriales.Range("U1").Value = "% DEL TOTAL"
+    shtMateriales.Range("V1").Value = "% ACUMULADO"
+    
+    'Ultima fila de los materiales
+    lastRow = shtMateriales.cells(shtMateriales.Rows.Count, 35).End(xlUp).Row - 1
+    
+    'Define todos los ranges
+    Set rngCodigos = shtMateriales.Range("I2:I" & lastRow)
+    Set rngSap = shtMateriales.Range("J2:J" & lastRow)
+    Set rngDiseño = shtMateriales.Range("K2:K" & lastRow)
+    Set rngDescripcion = shtMateriales.Range("L2:L" & lastRow)
+    Set rngFamilia = shtMateriales.Range("M2:M" & lastRow)
+    Set rngUnidad = shtMateriales.Range("N2:N" & lastRow)
+    Set rngPrecio = shtMateriales.Range("O2:O" & lastRow)
+    Set rngCantidades = shtMateriales.Range("P2:P" & lastRow)
+    Set rngTotal = shtMateriales.Range("Q2:Q" & lastRow)
+    Set rngCotizado = shtMateriales.Range("R2:R" & lastRow)
+    Set rngNumCotizacion = shtMateriales.Range("S2:S" & lastRow)
+    Set rngObservaciones = shtMateriales.Range("T2:T" & lastRow)
+    Set rngPorcTotal = shtMateriales.Range("U2:U" & lastRow)
+    Set rngPorcAcum = shtMateriales.Range("V2:V" & lastRow)
+    
+    Set rngPivotCodigos = shtMateriales.Range("AI2:AI" & lastRow)
+    Set rngPivotCantidad = shtMateriales.Range("AJ2:AJ" & lastRow)
+    Set rngPivtoPrecio = shtMateriales.Range("AK2:AK" & lastRow)
+    Set rngPivotTotal = shtMateriales.Range("AL2:AL" & lastRow)
+
+    'Copia la informacion de la pivot a la tabla
+    rngCodigos.Value = rngPivotCodigos.Value
+    rngCantidades.Value = rngPivotCantidad.Value
+    rngPrecio.Value = rngPivtoPrecio.Value
+    rngTotal.Value = rngPivotTotal.Value
+      
+    'Agrega las formulas del vlookup para encontrar los codigos y descripcion
+    rngSap.FormulaR1C1 = "=VLOOKUP(RC[-1], BD, 2, FALSE)"
+    rngDiseño.FormulaR1C1 = "=VLOOKUP(RC[-2], BD, 3, FALSE)"
+    rngDescripcion.FormulaR1C1 = "=VLOOKUP(RC[-3], BD, 4, FALSE)"
+    rngFamilia.FormulaR1C1 = "=IF(VLOOKUP(RC[-4], BD, 5, FALSE)=0, """", VLOOKUP(RC[-4], BD, 5, FALSE))"
+    rngUnidad.FormulaR1C1 = "=IF(VLOOKUP(RC[-5], BD, 6, FALSE)=0, """", VLOOKUP(RC[-5], BD, 6, FALSE))"
+    rngCotizado.FormulaR1C1 = "=IF(VLOOKUP(RC[-9], BD, 8, FALSE)=0, """", VLOOKUP(RC[-9], BD, 8, FALSE))"
+    rngNumCotizacion.FormulaR1C1 = "=IF(VLOOKUP(RC[-10], BD, 9, FALSE)=0, """", VLOOKUP(RC[-10], BD, 9, FALSE))"
+    rngObservaciones.FormulaR1C1 = "=IF(VLOOKUP(RC[-11], BD, 10, FALSE)=0, """", VLOOKUP(RC[-11], BD, 10, FALSE))"
+    
+    'Calcula los ranges
+    rngSap.Calculate
+    rngDiseño.Calculate
+    rngDescripcion.Calculate
+    rngFamilia.Calculate
+    rngUnidad.Calculate
+    rngCotizado.Calculate
+    rngNumCotizacion.Calculate
+    rngObservaciones.Calculate
+    
+    'Define los ranges de la fila de accesorios, y los totales
+    Dim rngTotalAccesorios As Range
+    Dim rngsubTotal As Range
+    Dim rngTotalSuma As Range
+    Dim rngImpuesto As Range
+    Dim rngPorcTotalAcc As Range
+    Dim rngPorcAcumAcc As Range
+    
+    Set rngsubTotal = shtMateriales.Range("Q" & lastRow + 2)
+    Set rngImpuesto = shtMateriales.Range("Q" & lastRow + 3)
+    Set rngTotalSuma = shtMateriales.Range("Q" & lastRow + 4)
+    Set rngTotalAccesorios = shtMateriales.Range("O" & lastRow + 1)
+    Set rngPorcTotalAcc = shtMateriales.Range("U" & lastRow + 1)
+    Set rngPorcAcumAcc = shtMateriales.Range("V" & lastRow + 1)
+    
+    'Agrega sub-total, total e impuesto
+    shtMateriales.Range("P" & lastRow + 2).Value = "SUB-TOTAL"
+    shtMateriales.Range("P" & lastRow + 3).Value = "IMPUESTO"
+    shtMateriales.Range("P" & lastRow + 4).Value = "TOTAL"
+
+    'Agrega las formulas para calcular el subtotal, impuesto y subtotal
+    rngsubTotal.formula = "=SUM(" & rngTotal.Address(False, False) & "," & shtMateriales.Range("Q" & lastRow + 1).Address(False, False) & ")"
+    rngImpuesto.FormulaR1C1 = "=(R[-1]C)*isv"
+    rngTotalSuma.FormulaR1C1 = "=(R[-2]C+R[-1]C)"
+    
+    'Guarda el valor del subtotal sin los accesorios
+    shtMateriales.Range("Q" & lastRow + 2).Calculate
+    subTotal = rngsubTotal.Value
+    
+    'Agrega la fila de los accesorios
+    shtMateriales.Range("I" & lastRow + 1).Value = "ACC"
+    shtMateriales.Range("L" & lastRow + 1).Value = "ACCESORIOS"
+    shtMateriales.Range("M" & lastRow + 1).Value = "ACCESORIOS"
+    shtMateriales.Range("N" & lastRow + 1).Value = "UNIDAD"
+    rngTotalAccesorios.formula = "=facc*" & changeCommas(subTotal)
+    rngTotalAccesorios.Value = rngTotalAccesorios.Value
+    shtMateriales.Range("P" & lastRow + 1).Value = 1
+    shtMateriales.Range("Q" & lastRow + 1).Value = rngTotalAccesorios.Value
+    
+    'Agrega la formula para el % del total y el % acumulado
+    Union(rngPorcTotal, rngPorcTotalAcc).FormulaR1C1 = "=RC[-4]/R" & lastRow + 2 & "C17 "
+    Union(rngPorcAcum, rngPorcAcumAcc).FormulaR1C1 = "=SUM(R2C21:RC[-1])"
+    
+    'Copia los ranges y los pega como valores
+    Union(rngSap, rngDiseño, rngDescripcion, rngFamilia, rngUnidad).Value = Union(rngSap, rngDiseño, rngDescripcion, rngFamilia, rngUnidad).Value
+    Union(rngCotizado, rngNumCotizacion, rngObservaciones).Value = Union(rngCotizado, rngNumCotizacion, rngObservaciones).Value
+End Sub
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Crea la tabla donde se muestra toda la informacion de los materiales
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub crearTablaFichas(shtMateriales As Worksheet, shtAlcance As Worksheet)
+    Dim rngNumFichasPivot As Range
+    Dim rngTotalFichaPivot As Range
+    
+    Dim rngNumFichas As Range
+    Dim rngTotalFicha As Range
+    Dim rngPorcTotal As Range
+    Dim rngPorcAcum As Range
+    Dim rngAuditoria As Range
+    
+    Dim rngAlcance As String
+    
+    Dim lastRow As Long
+    Dim lastRowAlcance As Long
+    
+    
+    lastRow = shtMateriales.cells(shtMateriales.Rows.Count, 40).End(xlUp).Row - 1
+    lastRowAlcance = shtAlcance.cells(shtAlcance.Rows.Count, 9).End(xlUp).Row
+    
+    'Setea los ranges de copiado, del pivot table
+    Set rngNumFichasPivot = shtMateriales.Range("AN2:AN" & lastRow)
+    Set rngTotalFichaPivot = shtMateriales.Range("AO2:AO" & lastRow)
+    
+    'Setea los ranges de pegado
+    Set rngNumFichas = shtMateriales.Range("X2:X" & lastRow)
+    Set rngTotalFicha = shtMateriales.Range("Y2:Y" & lastRow)
+    Set rngPorcTotal = shtMateriales.Range("Z2:Z" & lastRow)
+    Set rngPorcAcum = shtMateriales.Range("AA2:AA" & lastRow)
+    Set rngAuditoria = shtMateriales.Range("AB2:AB" & lastRow)
+    
+    rngAlcance = "'" & shtAlcance.Name & "'" & "!R6C3:R" & lastRowAlcance & "C7"
+    
+    'Copia los valores al nuevo range
+    Union(rngNumFichasPivot, rngTotalFichaPivot).Copy
+    Union(rngNumFichas, rngTotalFicha).PasteSpecial xlPasteValues
+
+    'Agrega el total al final
+    shtMateriales.Range("Y" & lastRow + 1).formula = "=SUM(" & rngTotalFicha.Address(False, False) & ")"
+    
+    'Agrega el porcentaje del total y el porcentaje acumulado
+    rngPorcTotal.FormulaR1C1 = "=RC[-1]/R" & lastRow + 1 & "C25"
+    rngPorcAcum.FormulaR1C1 = "=SUM(R2C26:RC[-1])"
+    
+    'Agrega la auditoria(VERIFICAR SI ESTO ESTA BUENO PARA OTRAS CONDICIONES,  NO ESTA BUENO CUANDO EL ALCANCE ESTA EN UNA HOJA DIFERENTE A LOS MATERIALES)
+    rngAuditoria.FormulaR1C1 = "=VLOOKUP(RC[-4]," & rngAlcance & ", 5, FALSE)*" & "VLOOKUP(RC[-4]," & rngAlcance & ", 4, FALSE)" & "-(1+facc)*RC[-3]"
+    
+    'Agrega los titulos
+    shtMateriales.Range("X1").Value = "NUM FICHA"
+    shtMateriales.Range("Y1").Value = "TOTAL FICHA"
+    shtMateriales.Range("Z1").Value = "% DEL TOTAL"
+    shtMateriales.Range("AA1").Value = "% ACUMULADO"
+    shtMateriales.Range("AB1").Value = "AUDITORIA"
+End Sub
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Crea la tabla donde se muestra toda la informacion de las familias
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub crearTablaFamilias(shtMateriales As Worksheet)
+    Dim rngFamiliasPivot As Range
+    Dim rngFamilias As Range
+    
+    Dim rngPorcAcum As Range
+    
+    Dim lastRow As Long
+    
+    'La ultima fila de la pivot table
+    lastRow = shtMateriales.cells(shtMateriales.Rows.Count, 43).End(xlUp).Row - 1
+    
+    'El range de la pivot
+    Set rngFamiliasPivot = shtMateriales.Range("AQ2:AS" & lastRow)
+    
+    'El range de las familias
+    Set rngFamilias = shtMateriales.Range("AD2:AF" & lastRow)
+    
+    'Hace el copiado como valores
+    rngFamiliasPivot.Copy
+    rngFamilias.PasteSpecial xlPasteValues
+    
+    'Añade la formula para el porcentaje acumulado total
+    Set rngPorcAcum = shtMateriales.Range("AG2:AG" & lastRow)
+    rngPorcAcum.FormulaR1C1 = "=SUM(R2C32:RC[-1])"
+    
+    'Añade los titulos de la tabla
+    shtMateriales.Range("AD1").Value = "FAMILIA"
+    shtMateriales.Range("AE1").Value = "TOTAL"
+    shtMateriales.Range("AF1").Value = "% DEL TOTAL"
+    shtMateriales.Range("AG1").Value = "% ACUMULADO"
+End Sub
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Convierte los ranges en tablas, añade los formatos de numeros y bold
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Sub formatearTablas(shtMateriales As Worksheet)
+    Dim lastRowExplotadas As Long
+    Dim lastRowListado As Long
+    Dim lastRowFichas As Long
+    Dim lastRowFamilias As Long
+    
+    Dim rngExplotadas As Range
+    Dim rngListado As Range
+    Dim rngFichas As Range
+    Dim rngFamilias As Range
+    
+    lastRowExplotadas = shtMateriales.cells(shtMateriales.Rows.Count, 1).End(xlUp).Row
+    lastRowListado = shtMateriales.cells(shtMateriales.Rows.Count, 9).End(xlUp).Row
+    lastRowFichas = shtMateriales.cells(shtMateriales.Rows.Count, 24).End(xlUp).Row
+    lastRowFamilias = shtMateriales.cells(shtMateriales.Rows.Count, 30).End(xlUp).Row
+    
+    Set rngExplotadas = shtMateriales.Range("A1:G" & lastRowExplotadas)
+    Set rngListado = shtMateriales.Range("I1:V" & lastRowListado)
+    Set rngFichas = shtMateriales.Range("X1:AB" & lastRowFichas)
+    Set rngFamilias = shtMateriales.Range("AD1:AG" & lastRowFamilias)
+    
+    'Crea las tablas
+    Dim tblExplotadas As ListObject
+    Dim tblListado As ListObject
+    Dim tblFichas As ListObject
+    Dim tblFamilias As ListObject
+    
+    Set tblExplotadas = shtMateriales.ListObjects.Add(xlSrcRange, rngExplotadas, , xlYes)
+    Set tblListado = shtMateriales.ListObjects.Add(xlSrcRange, rngListado, , xlYes)
+    Set tblFichas = shtMateriales.ListObjects.Add(xlSrcRange, rngFichas, , xlYes)
+    Set tblFamilias = shtMateriales.ListObjects.Add(xlSrcRange, rngFamilias, , xlYes)
+    
+    'Ordena las tablas de largest to smallest para hacer el analisis de pareto
+    tblListado.Range.Sort key1:=tblListado.ListColumns(13), order1:=xlDescending, Header:=xlYes, OrderCustom:=1, MatchCase:=False, Orientation:=xlTopToBottom
+    tblFichas.Range.Sort key1:=tblFichas.ListColumns(3), order1:=xlDescending, Header:=xlYes, OrderCustom:=1, MatchCase:=False, Orientation:=xlTopToBottom
+    tblFamilias.Range.Sort key1:=tblFamilias.ListColumns(3), order1:=xlDescending, Header:=xlYes, OrderCustom:=1, MatchCase:=False, Orientation:=xlTopToBottom
+    
+    'Ranges de uso general para setear los formatos de numeros y otros
+    Dim rng1 As Range
+    Dim rng2 As Range
+    Dim rng3 As Range
+    Dim rng4 As Range
+    Dim rng5 As Range
+    Dim rng6 As Range
+    Dim rng7 As Range
+    
+    'Formato de numeros con separadorde miles y dos decimales
+    Set rng1 = shtMateriales.Range("E2:G" & lastRowExplotadas)
+    Set rng2 = shtMateriales.Range("O2:Q" & lastRowListado)
+    Set rng3 = shtMateriales.Range("Y2:Y" & lastRowFichas)
+    Set rng4 = shtMateriales.Range("AB2:AB" & lastRowFichas)
+    Set rng5 = shtMateriales.Range("Q" & lastRowListado + 1 & ":Q" & lastRowListado + 4)
+    Set rng6 = shtMateriales.Range("Y" & lastRowFichas + 1)
+    Set rng7 = shtMateriales.Range("AE2:AE" & lastRowFamilias)
+    
+    With Union(rng1, rng2, rng3, rng4, rng5, rng6, rng7)
+        .NumberFormat = "#,##0.00; [Red]#,##0.00; 0.00"
+    End With
+    
+    'Formateo de bold letters
+    rng5.Font.Bold = True
+
+    'Formato de numeros como porcentajes con dos decimales
+    Set rng1 = shtMateriales.Range("U2:V" & lastRowListado)
+    Set rng2 = shtMateriales.Range("Z2:AA" & lastRowFichas)
+    Set rng3 = shtMateriales.Range("AF2:AG" & lastRowFamilias)
+    With Union(rng1, rng2, rng3)
+        .NumberFormat = "0.00%"
+    End With
+End Sub
+
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Cambia las comas a puntos decimales. En las funciones donde se guarda el numero en una variable y despues se concatena a una formula con
+'Formula o .FormulaR1C1 el metodo falla si es que el sistema esta configurado para usar comas. Por alguna razon las formulas necesitan utilizar el punto en vez de la coma
+'Esto a pesar de que VBA si reconoce los numeros con coma correctamente
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+Public Function changeCommas(ByVal myValue As Variant) As String
+    Dim temp As String
+    temp = CStr(myValue)
+    changeCommas = Replace(temp, ",", ".")
+End Function
+
+
+Sub crearListadoMateriales()
+On Error Resume Next
+    'If ComprobarLicencia Then
+        frmMateriales.Show (False)
+    'End If
+End Sub
+
+Sub encender_Optimizaciones()
+    Application.Calculation = xlManual
+    Application.DisplayAlerts = False
+    Application.ScreenUpdating = False
+    Application.DisplayStatusBar = False
+    Application.EnableEvents = False
+End Sub
+
+Sub apagar_Optimizaciones()
+    Application.Calculation = xlAutomatic
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = True
+    Application.DisplayStatusBar = True
+    Application.EnableEvents = True
+End Sub
